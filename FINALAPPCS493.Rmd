@@ -1,0 +1,601 @@
+---
+title: "APP"
+author: "Kellie Linehan"
+date: "2026-03-26"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+
+# ── Libraries ──────────────────────────────────────────────────────────────────
+library(shiny)
+library(tidyverse)
+library(scales)
+
+# ── Load data ──────────────────────────────────────────────────────────────────
+game     <- read.csv("~/Downloads/Game_Cleaned (1).csv",     stringsAsFactors = FALSE)
+practice <- read.csv("~/Downloads/Practice_Cleaned (1).csv", stringsAsFactors = FALSE)
+
+# ── Prepare each dataset ───────────────────────────────────────────────────────
+prep_shots <- function(df) {
+  df %>%
+    mutate(
+      made       = as.integer(MadeShot == "TRUE" | MadeShot == TRUE),
+      shot_zone  = factor(ShotZone,
+                          levels = c("In the Paint", "Mid Range 2's",
+                                     "Corner 3's", "Above Break 3's")),
+      contest    = factor(Shot.Contest,
+                          levels = c("Wide Open", "Lightly Contested",
+                                     "Highly Contested", "Blocked")),
+      shot_type  = factor(Shot.Type),
+      shot_clock = case_when(
+        Shot.Clock == "5-0"   ~ 1,
+        Shot.Clock == "10-6"  ~ 2,
+        Shot.Clock == "21-11" ~ 3,
+        Shot.Clock == "22+"   ~ 4,
+        TRUE ~ NA_real_
+      ),
+      shot_value = as.numeric(ShotValue)
+    ) %>%
+    filter(!is.na(made), !is.na(shot_clock), !is.na(shot_value))
+}
+
+train_data <- prep_shots(practice)   # MODEL TRAINED ON PRACTICE
+test_data  <- prep_shots(game)       # MODEL TESTED ON GAME
+
+# ── Fit logistic regression ────────────────────────────────────────────────────
+# All predictors have >1 level in practice data, so we use all four
+shot_glm <- glm(
+  made ~ shot_zone + shot_clock + contest + shot_type,
+  data   = train_data,
+  family = binomial(link = "logit")
+)
+
+# ── Generate predictions on game data ─────────────────────────────────────────
+test_data <- test_data %>%
+  mutate(
+    p_make           = predict(shot_glm, newdata = test_data, type = "response"),
+    exp_points       = p_make * shot_value,
+    actual_points    = made * shot_value,
+    points_above_exp = actual_points - exp_points
+  )
+
+# ── Summary tables ─────────────────────────────────────────────────────────────
+
+# Per-player overall summary (all zones combined)
+player_summary <- test_data %>%
+  group_by(Shooter) %>%
+  summarise(
+    attempts          = n(),
+    makes             = sum(made),
+    fg_pct            = round(makes / attempts * 100, 1),
+    actual_pts        = round(sum(actual_points), 1),
+    expected_pts      = round(sum(exp_points), 1),
+    pts_above_exp     = round(actual_pts - expected_pts, 1),
+    pts_above_exp_100 = round(100 * pts_above_exp / attempts, 1),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(pts_above_exp_100))
+
+# Per-player × zone
+player_zone_summary <- test_data %>%
+  group_by(Shooter, ShotZone) %>%
+  summarise(
+    attempts          = n(),
+    makes             = sum(made),
+    fg_pct            = round(makes / attempts * 100, 1),
+    actual_pts        = round(sum(actual_points), 1),
+    expected_pts      = round(sum(exp_points), 1),
+    pts_above_exp     = round(actual_pts - expected_pts, 1),
+    pts_above_exp_100 = round(100 * pts_above_exp / attempts, 1),
+    .groups = "drop"
+  )
+
+# Per-player × shot type
+player_type_summary <- test_data %>%
+  group_by(Shooter, Shot.Type) %>%
+  summarise(
+    attempts          = n(),
+    makes             = sum(made),
+    fg_pct            = round(makes / attempts * 100, 1),
+    actual_pts        = round(sum(actual_points), 1),
+    expected_pts      = round(sum(exp_points), 1),
+    pts_above_exp     = round(actual_pts - expected_pts, 1),
+    pts_above_exp_100 = round(100 * pts_above_exp / attempts, 1),
+    .groups = "drop"
+  )
+
+# Per-player × contest level
+player_contest_summary <- test_data %>%
+  group_by(Shooter, Shot.Contest) %>%
+  summarise(
+    attempts          = n(),
+    makes             = sum(made),
+    fg_pct            = round(makes / attempts * 100, 1),
+    actual_pts        = round(sum(actual_points), 1),
+    expected_pts      = round(sum(exp_points), 1),
+    pts_above_exp     = round(actual_pts - expected_pts, 1),
+    pts_above_exp_100 = round(100 * pts_above_exp / attempts, 1),
+    .groups = "drop"
+  )
+
+all_players <- sort(unique(player_summary$Shooter))
+
+# ── Colour palette ─────────────────────────────────────────────────────────────
+au_red  <- "#CC0000"
+au_navy <- "#002147"
+bg_light <- "#f8f9fa"
+
+zone_colors <- c(
+  "In the Paint"    = "#1a6faf",
+  "Mid Range 2's"   = "#e8a838",
+  "Corner 3's"      = "#3aaa72",
+  "Above Break 3's" = "#cc4444"
+)
+
+# ── Helper: PAE colour (red/green) ────────────────────────────────────────────
+pae_fill <- function(vals) {
+  ifelse(vals >= 0, "#3aaa72", "#cc4444")
+}
+
+# ── UI ─────────────────────────────────────────────────────────────────────────
+ui <- fluidPage(
+  tags$head(
+    tags$style(HTML(sprintf("
+      body { background-color: %s; font-family: 'Helvetica Neue', Arial, sans-serif; }
+      .navbar-brand, h2, h3, h4 { color: %s; font-weight: 700; }
+      .well { background-color: #ffffff; border: 1px solid #ddd; border-radius: 8px; }
+      .nav-tabs > li.active > a { border-top: 3px solid %s; font-weight: 600; }
+      .table thead th { background-color: %s; color: white; }
+      .section-title { color: %s; border-bottom: 2px solid %s;
+                       padding-bottom: 4px; margin-bottom: 12px; }
+      .stat-box { background: white; border-radius: 8px; padding: 14px 18px;
+                  margin: 6px; box-shadow: 0 1px 4px rgba(0,0,0,.1);
+                  display: inline-block; min-width: 130px; text-align: center; }
+      .stat-value { font-size: 1.8em; font-weight: 700; color: %s; }
+      .stat-label { font-size: .85em; color: #555; margin-top: 2px; }
+    ", bg_light, au_navy, au_red, au_navy, au_red, au_red, au_navy)))
+  ),
+
+  # ── Header ──
+  div(style = sprintf("background-color:%s;padding:18px 24px;margin-bottom:20px;
+                        border-radius:0 0 10px 10px;", au_navy),
+    h2(style = "color:white;margin:0;", "AU Men's Basketball — Shooting Dashboard"),
+    p(style  = "color:#aac4e0;margin:4px 0 0;font-size:.9em;",
+      "Model trained on practice data · Evaluated on game data")
+  ),
+
+  tabsetPanel(
+    id = "main_tabs",
+
+    # ════════════════════════════════════════════════════════════════════════
+    # TAB 1: Team Overview
+    # ════════════════════════════════════════════════════════════════════════
+    tabPanel("Team Overview",
+      br(),
+      fluidRow(
+        column(12,
+          h4(class = "section-title", "Team-wide performance (game data)"),
+          fluidRow(
+            column(3,
+              div(class = "stat-box",
+                div(class = "stat-value", nrow(test_data)),
+                div(class = "stat-label", "Total Attempts")
+              )
+            ),
+            column(3,
+              div(class = "stat-box",
+                div(class = "stat-value",
+                    paste0(round(mean(test_data$made)*100, 1), "%")),
+                div(class = "stat-label", "FG%")
+              )
+            ),
+            column(3,
+              div(class = "stat-box",
+                div(class = "stat-value",
+                    round(sum(test_data$actual_points), 0)),
+                div(class = "stat-label", "Total Points")
+              )
+            ),
+            column(3,
+              div(class = "stat-box",
+                div(class = "stat-value",
+                    round(sum(test_data$points_above_exp), 1)),
+                div(class = "stat-label", "Total Pts Above Exp")
+              )
+            )
+          ),
+          br(),
+          h4(class = "section-title", "Player leaderboard — Points above expected per 100 shots"),
+          tableOutput("team_leaderboard"),
+          br(),
+          h4(class = "section-title", "Team efficiency by shot zone"),
+          plotOutput("team_zone_plot", height = "320px"),
+          br(),
+          h4(class = "section-title", "Team efficiency by contest level"),
+          plotOutput("team_contest_plot", height = "320px")
+        )
+      )
+    ),
+
+    # ════════════════════════════════════════════════════════════════════════
+    # TAB 2: Individual Player
+    # ════════════════════════════════════════════════════════════════════════
+    tabPanel("Individual Player",
+      br(),
+      sidebarLayout(
+        sidebarPanel(width = 3,
+          selectInput("player", "Select player:",
+                      choices  = all_players,
+                      selected = all_players[1]),
+          hr(),
+          h5(style = "font-weight:600;", "About this dashboard"),
+          p(style = "font-size:.85em; color:#555;",
+            "Points Above Expected (PAE) measures how many actual points a player
+             scored versus what the model predicted given shot difficulty.
+             Positive = above expectation. PAE/100 normalises for volume.")
+        ),
+        mainPanel(width = 9,
+          h3(textOutput("player_title")),
+
+          # Stat boxes
+          uiOutput("player_stat_boxes"),
+          br(),
+
+          tabsetPanel(
+            tabPanel("By Zone",
+              br(),
+              h4(class = "section-title", "Performance by shot zone"),
+              tableOutput("zone_table"),
+              br(),
+              plotOutput("zone_barplot", height = "300px")
+            ),
+            tabPanel("By Shot Type",
+              br(),
+              h4(class = "section-title", "Performance by shot type"),
+              tableOutput("type_table"),
+              br(),
+              plotOutput("type_barplot", height = "300px")
+            ),
+            tabPanel("By Contest Level",
+              br(),
+              h4(class = "section-title", "Performance by contest level"),
+              tableOutput("contest_table"),
+              br(),
+              plotOutput("contest_barplot", height = "300px")
+            )
+          )
+        )
+      )
+    ),
+
+    # ════════════════════════════════════════════════════════════════════════
+    # TAB 3: Player Comparison
+    # ════════════════════════════════════════════════════════════════════════
+    tabPanel("Compare Players",
+      br(),
+      fluidRow(
+        column(4,
+          selectInput("cmp_p1", "Player 1:",
+                      choices  = all_players,
+                      selected = all_players[1])
+        ),
+        column(4,
+          selectInput("cmp_p2", "Player 2:",
+                      choices  = all_players,
+                      selected = all_players[min(2, length(all_players))])
+        ),
+        column(4,
+          selectInput("cmp_metric", "Compare by:",
+                      choices = c(
+                        "PAE per 100 shots"  = "pts_above_exp_100",
+                        "Total PAE"          = "pts_above_exp",
+                        "FG%"                = "fg_pct",
+                        "Actual points"      = "actual_pts"
+                      ))
+        )
+      ),
+      h4(class = "section-title", "Shot zone comparison"),
+      plotOutput("cmp_zone_plot", height = "350px"),
+      br(),
+      h4(class = "section-title", "Shot type comparison"),
+      plotOutput("cmp_type_plot", height = "350px")
+    )
+  )
+)
+
+# ── Server ─────────────────────────────────────────────────────────────────────
+server <- function(input, output, session) {
+
+  # ── Reactive subsets ─────────────────────────────────────────────────────────
+  player_zone    <- reactive({
+    player_zone_summary %>%
+      filter(Shooter == input$player) %>%
+      arrange(desc(pts_above_exp_100))
+  })
+
+  player_type    <- reactive({
+    player_type_summary %>%
+      filter(Shooter == input$player) %>%
+      arrange(desc(pts_above_exp_100))
+  })
+
+  player_contest <- reactive({
+    player_contest_summary %>%
+      filter(Shooter == input$player) %>%
+      arrange(desc(pts_above_exp_100))
+  })
+
+  player_overall <- reactive({
+    player_summary %>% filter(Shooter == input$player)
+  })
+
+  # ── TAB 1: Team Overview ─────────────────────────────────────────────────────
+  output$team_leaderboard <- renderTable({
+    player_summary %>%
+      select(
+        Player              = Shooter,
+        Attempts            = attempts,
+        Makes               = makes,
+        `FG%`               = fg_pct,
+        `Actual Pts`        = actual_pts,
+        `Expected Pts`      = expected_pts,
+        `PAE`               = pts_above_exp,
+        `PAE / 100`         = pts_above_exp_100
+      )
+  }, striped = TRUE, hover = TRUE, bordered = TRUE)
+
+  output$team_zone_plot <- renderPlot({
+    test_data %>%
+      group_by(ShotZone) %>%
+      summarise(
+        attempts      = n(),
+        pts_above_exp = sum(points_above_exp),
+        pae_100       = 100 * pts_above_exp / attempts,
+        .groups = "drop"
+      ) %>%
+      mutate(ShotZone = fct_reorder(ShotZone, pae_100)) %>%
+      ggplot(aes(x = ShotZone, y = pae_100, fill = ShotZone)) +
+      geom_col(show.legend = FALSE) +
+      geom_hline(yintercept = 0, linewidth = .6, linetype = "dashed") +
+      scale_fill_manual(values = zone_colors) +
+      coord_flip() +
+      labs(x = NULL, y = "PAE per 100 shots",
+           title = "Team PAE per 100 shots by zone") +
+      theme_minimal(base_size = 13) +
+      theme(plot.title = element_text(face = "bold", colour = au_navy))
+  })
+
+  output$team_contest_plot <- renderPlot({
+    contest_order <- c("Wide Open", "Lightly Contested",
+                       "Highly Contested", "Blocked")
+    test_data %>%
+      group_by(Shot.Contest) %>%
+      summarise(
+        attempts      = n(),
+        fg_pct        = mean(made) * 100,
+        exp_fg        = mean(p_make) * 100,
+        .groups = "drop"
+      ) %>%
+      mutate(Shot.Contest = factor(Shot.Contest, levels = contest_order)) %>%
+      pivot_longer(cols = c(fg_pct, exp_fg),
+                   names_to = "type", values_to = "pct") %>%
+      mutate(type = recode(type,
+                           fg_pct = "Actual FG%",
+                           exp_fg = "Expected FG%")) %>%
+      ggplot(aes(x = Shot.Contest, y = pct, fill = type)) +
+      geom_col(position = "dodge") +
+      scale_fill_manual(values = c("Actual FG%" = au_red,
+                                   "Expected FG%" = au_navy)) +
+      labs(x = "Contest level", y = "FG%", fill = NULL,
+           title = "Actual vs expected FG% by contest level") +
+      theme_minimal(base_size = 13) +
+      theme(plot.title  = element_text(face = "bold", colour = au_navy),
+            legend.position = "top")
+  })
+
+  # ── TAB 2: Individual ────────────────────────────────────────────────────────
+  output$player_title <- renderText({
+    paste("Game-day performance —", input$player)
+  })
+
+  output$player_stat_boxes <- renderUI({
+    p <- player_overall()
+    if (nrow(p) == 0) return(p("No data for this player."))
+
+    pae_color <- if (p$pts_above_exp >= 0) "#3aaa72" else "#cc4444"
+
+    fluidRow(
+      column(2, div(class = "stat-box",
+        div(class = "stat-value", p$attempts),
+        div(class = "stat-label", "Attempts"))),
+      column(2, div(class = "stat-box",
+        div(class = "stat-value", paste0(p$fg_pct, "%")),
+        div(class = "stat-label", "FG%"))),
+      column(2, div(class = "stat-box",
+        div(class = "stat-value", p$actual_pts),
+        div(class = "stat-label", "Actual Points"))),
+      column(2, div(class = "stat-box",
+        div(class = "stat-value", p$expected_pts),
+        div(class = "stat-label", "Expected Points"))),
+      column(2, div(class = "stat-box",
+        div(class = "stat-value",
+            style = paste0("color:", pae_color, ";"), p$pts_above_exp),
+        div(class = "stat-label", "Pts Above Exp"))),
+      column(2, div(class = "stat-box",
+        div(class = "stat-value",
+            style = paste0("color:", pae_color, ";"), p$pts_above_exp_100),
+        div(class = "stat-label", "PAE / 100")))
+    )
+  })
+
+  # Zone tab
+  output$zone_table <- renderTable({
+    player_zone() %>%
+      select(
+        `Shot Zone`     = ShotZone,
+        Attempts        = attempts,
+        Makes           = makes,
+        `FG%`           = fg_pct,
+        `Actual Pts`    = actual_pts,
+        `Expected Pts`  = expected_pts,
+        `PAE`           = pts_above_exp,
+        `PAE / 100`     = pts_above_exp_100
+      )
+  }, striped = TRUE, hover = TRUE, bordered = TRUE)
+
+  output$zone_barplot <- renderPlot({
+    df <- player_zone() %>%
+      mutate(ShotZone = fct_reorder(ShotZone, pts_above_exp_100))
+    ggplot(df, aes(x = ShotZone, y = pts_above_exp_100, fill = ShotZone)) +
+      geom_col(show.legend = FALSE) +
+      geom_hline(yintercept = 0, linewidth = .6, linetype = "dashed") +
+      geom_text(aes(label = round(pts_above_exp_100, 1),
+                    hjust = ifelse(pts_above_exp_100 >= 0, -.15, 1.1)),
+                size = 3.8) +
+      scale_fill_manual(values = zone_colors,
+                        breaks = names(zone_colors)) +
+      coord_flip() +
+      expand_limits(y = c(
+        min(df$pts_above_exp_100) * 1.2,
+        max(df$pts_above_exp_100) * 1.2
+      )) +
+      labs(x = NULL, y = "PAE per 100 shots",
+           title = paste("PAE per 100 shots by zone —", input$player)) +
+      theme_minimal(base_size = 13) +
+      theme(plot.title = element_text(face = "bold", colour = au_navy))
+  })
+
+  # Shot type tab
+  output$type_table <- renderTable({
+    player_type() %>%
+      select(
+        `Shot Type`     = Shot.Type,
+        Attempts        = attempts,
+        Makes           = makes,
+        `FG%`           = fg_pct,
+        `Actual Pts`    = actual_pts,
+        `Expected Pts`  = expected_pts,
+        `PAE`           = pts_above_exp,
+        `PAE / 100`     = pts_above_exp_100
+      )
+  }, striped = TRUE, hover = TRUE, bordered = TRUE)
+
+  output$type_barplot <- renderPlot({
+    df <- player_type() %>%
+      mutate(Shot.Type = fct_reorder(Shot.Type, pts_above_exp_100))
+    ggplot(df, aes(x = Shot.Type, y = pts_above_exp_100,
+                   fill = pts_above_exp_100 >= 0)) +
+      geom_col(show.legend = FALSE) +
+      geom_hline(yintercept = 0, linewidth = .6, linetype = "dashed") +
+      geom_text(aes(label = round(pts_above_exp_100, 1),
+                    hjust = ifelse(pts_above_exp_100 >= 0, -.15, 1.1)),
+                size = 3.8) +
+      scale_fill_manual(values = c("TRUE" = "#3aaa72", "FALSE" = "#cc4444")) +
+      coord_flip() +
+      expand_limits(y = c(
+        min(df$pts_above_exp_100, 0) * 1.2,
+        max(df$pts_above_exp_100, 0) * 1.2
+      )) +
+      labs(x = NULL, y = "PAE per 100 shots",
+           title = paste("PAE per 100 shots by shot type —", input$player)) +
+      theme_minimal(base_size = 13) +
+      theme(plot.title = element_text(face = "bold", colour = au_navy))
+  })
+
+  # Contest tab
+  output$contest_table <- renderTable({
+    player_contest() %>%
+      select(
+        `Contest Level`  = Shot.Contest,
+        Attempts         = attempts,
+        Makes            = makes,
+        `FG%`            = fg_pct,
+        `Actual Pts`     = actual_pts,
+        `Expected Pts`   = expected_pts,
+        `PAE`            = pts_above_exp,
+        `PAE / 100`      = pts_above_exp_100
+      )
+  }, striped = TRUE, hover = TRUE, bordered = TRUE)
+
+  output$contest_barplot <- renderPlot({
+    contest_order <- c("Wide Open", "Lightly Contested",
+                       "Highly Contested", "Blocked")
+    df <- player_contest() %>%
+      mutate(
+        Shot.Contest = factor(Shot.Contest, levels = contest_order)
+      ) %>%
+      arrange(Shot.Contest)
+    ggplot(df, aes(x = Shot.Contest, y = pts_above_exp_100,
+                   fill = pts_above_exp_100 >= 0)) +
+      geom_col(show.legend = FALSE) +
+      geom_hline(yintercept = 0, linewidth = .6, linetype = "dashed") +
+      geom_text(aes(label = round(pts_above_exp_100, 1),
+                    vjust = ifelse(pts_above_exp_100 >= 0, -.4, 1.2)),
+                size = 3.8) +
+      scale_fill_manual(values = c("TRUE" = "#3aaa72", "FALSE" = "#cc4444")) +
+      expand_limits(y = c(
+        min(df$pts_above_exp_100, 0) * 1.2,
+        max(df$pts_above_exp_100, 0) * 1.2
+      )) +
+      labs(x = "Contest level", y = "PAE per 100 shots",
+           title = paste("PAE per 100 shots by contest —", input$player)) +
+      theme_minimal(base_size = 13) +
+      theme(plot.title = element_text(face = "bold", colour = au_navy))
+  })
+
+  # ── TAB 3: Comparison ────────────────────────────────────────────────────────
+  output$cmp_zone_plot <- renderPlot({
+    req(input$cmp_p1, input$cmp_p2)
+    metric <- input$cmp_metric
+
+    df <- player_zone_summary %>%
+      filter(Shooter %in% c(input$cmp_p1, input$cmp_p2)) %>%
+      mutate(
+        ShotZone = factor(ShotZone,
+                          levels = c("In the Paint", "Mid Range 2's",
+                                     "Corner 3's", "Above Break 3's")),
+        Shooter  = factor(Shooter, levels = c(input$cmp_p1, input$cmp_p2))
+      )
+
+    ggplot(df, aes(x = ShotZone, y = .data[[metric]], fill = Shooter)) +
+      geom_col(position = "dodge") +
+      geom_hline(yintercept = 0, linewidth = .5, linetype = "dashed") +
+      scale_fill_manual(values = c(au_red, au_navy)) +
+      coord_flip() +
+      labs(x = NULL, y = metric, fill = NULL,
+           title = paste("Shot zone comparison —",
+                         gsub("#\\d+ ", "", input$cmp_p1), "vs",
+                         gsub("#\\d+ ", "", input$cmp_p2))) +
+      theme_minimal(base_size = 13) +
+      theme(plot.title   = element_text(face = "bold", colour = au_navy),
+            legend.position = "top")
+  })
+
+  output$cmp_type_plot <- renderPlot({
+    req(input$cmp_p1, input$cmp_p2)
+    metric <- input$cmp_metric
+
+    df <- player_type_summary %>%
+      filter(Shooter %in% c(input$cmp_p1, input$cmp_p2)) %>%
+      mutate(Shooter = factor(Shooter, levels = c(input$cmp_p1, input$cmp_p2)))
+
+    ggplot(df, aes(x = fct_reorder(Shot.Type, .data[[metric]]),
+                   y = .data[[metric]], fill = Shooter)) +
+      geom_col(position = "dodge") +
+      geom_hline(yintercept = 0, linewidth = .5, linetype = "dashed") +
+      scale_fill_manual(values = c(au_red, au_navy)) +
+      coord_flip() +
+      labs(x = NULL, y = metric, fill = NULL,
+           title = paste("Shot type comparison —",
+                         gsub("#\\d+ ", "", input$cmp_p1), "vs",
+                         gsub("#\\d+ ", "", input$cmp_p2))) +
+      theme_minimal(base_size = 13) +
+      theme(plot.title   = element_text(face = "bold", colour = au_navy),
+            legend.position = "top")
+  })
+}
+
+shinyApp(ui, server)
+```
