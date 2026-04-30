@@ -19,38 +19,38 @@ The project was built as an affordable and interpretable basketball analytics to
 
 ### The project currently expects two cleaned CSV files:
 
-- practice data for model training
+  - practice data for model training
 
-- game data for model testing and dashboard outputs
+  - game data for model testing and dashboard outputs
 
 ### Important columns include:
+  
+  - Shooter
 
-- Shooter
+  - MadeShot
 
-- MadeShot
+  - ShotZone
 
-- ShotZone
+  - Shot.Type
 
-- Shot.Type
+  - Shot.Contest
 
-- Shot.Contest
+  - Shot.Clock
 
-- Shot.Clock
-
-- ShotValue
+  - ShotValue
 
 ## Current model
 The current dashboard uses a logistic regression model trained on practice data and evaluated on game data. The predictors in the model include shot zone, shot clock group, contest level, and shot type.
 
 ### The predicted make probability for each shot is used to calculate:
 
-- Expected points
+  - Expected points
 
-- Actual points
+  - Actual points
 
-- Points Above Expected (PAE)
+  - Points Above Expected (PAE)
 
-- PAE per 100 shots
+  - PAE per 100 shots
 
 These metrics are then summarized by player, shot zone, shot type, and contest level.
 
@@ -60,36 +60,36 @@ These metrics are then summarized by player, shot zone, shot type, and contest l
 
 #### Team Overview
 
--Team shooting summary
+  -Team shooting summary
 
--Player leaderboard by PAE per 100 shots
+  -Player leaderboard by PAE per 100 shots
 
--Team-level plots by shot zone and contest level
+  -Team-level plots by shot zone and contest level
 
 
 #### Individual Player
 
--Player stat boxes
+  -Player stat boxes
 
--Tables and charts by shot zone
+  -Tables and charts by shot zone
 
--Tables and charts by shot type
+  -Tables and charts by shot type
 
--Tables and charts by contest level
+  -Tables and charts by contest level
 
 
 #### Compare Players
 
--Side-by-side player comparisons
+  -Side-by-side player comparisons
 
--Multiple metric choices including FG%, total PAE, and PAE per 100 shots
+  -Multiple metric choices including FG%, total PAE, and PAE per 100 shots
 
 
 ## How to run the app
--Download or clone this repository.
+  -Download or clone this repository.
 
--Replace the current CSV paths.
+  -Replace the current CSV paths.
 
--Open the file in RStudio.
+  -Open the file in RStudio.
 
--Install required packages if needed: install.packages(c("shiny", "tidyverse", "scales"))
+  -Install required packages if needed: install.packages(c("shiny", "tidyverse", "scales"))
