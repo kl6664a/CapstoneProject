@@ -1,8 +1,8 @@
 # AU Basketball Shooting Dashboard
-This repository contains the code and project materials for a capstone project that turns manually tracked AU men's basketball shot data into a decision-support dashboard. The project uses R and Shiny to estimate shot make probability, calculate expected points, and compare player performance across different shooting contexts.
+This repository contains the code and project materials for my capstone project that turns manually tracked AU men's basketball shot data into a decision-support dashboard. This project uses R and Shiny to estimate shot make probability, calculate expected points, and compare player performance across different shooting contexts.
 
 ## Overview
-The project was built as an affordable and interpretable basketball analytics tool for American University. Shot data was manually collected with Hudl Sportscode, exported to CSV files, cleaned in R, modeled using logistic regression, and displayed in a Shiny dashboard.
+This project was built as an affordable and interpretable basketball analytics tool for American University. Shot data was manually collected with Hudl Sportscode, exported to CSV files, cleaned in R, modeled using logistic regression, and displayed in a Shiny dashboard.
 
 ## The tool is designed to answer questions such as:
 
