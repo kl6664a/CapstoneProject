@@ -88,6 +88,8 @@ These metrics are then summarized by player, shot zone, shot type, and contest l
 ## How to run the app
   -Download or clone this repository.
 
+  -Download game and practice data CSV files. 
+
   -Replace the current CSV paths.
 
   -Open the file in RStudio.
