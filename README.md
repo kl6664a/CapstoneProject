@@ -95,3 +95,7 @@ These metrics are then summarized by player, shot zone, shot type, and contest l
   -Open the file in RStudio.
 
   -Install required packages if needed: install.packages(c("shiny", "tidyverse", "scales"))
+
+  ## Contact Information
+  - Kellie Linehan
+  - Email: kl6664a@american.edu
